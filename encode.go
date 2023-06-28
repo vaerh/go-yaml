@@ -3,6 +3,7 @@ package yaml
 import (
 	"context"
 	"encoding"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"math"
@@ -465,6 +466,9 @@ func (e *Encoder) encodeValue(ctx context.Context, v reflect.Value, column int) 
 		if mapSlice, ok := v.Interface().(MapSlice); ok {
 			return e.encodeMapSlice(ctx, mapSlice, column)
 		}
+		if v.Type().Elem().Kind() == reflect.Uint8 {
+			return e.encodeBinary(ctx, v.Bytes(), column), nil
+		}
 		return e.encodeSlice(ctx, v)
 	case reflect.Array:
 		return e.encodeArray(ctx, v)
@@ -868,4 +872,36 @@ func (e *Encoder) encodeStruct(ctx context.Context, value reflect.Value, column 
 		return anchorNode, nil
 	}
 	return node, nil
+}
+
+func (e *Encoder) encodeBinary(ctx context.Context, b []byte, column int) ast.Node {
+	v := encodeBase64(b)
+	return &ast.LiteralNode{
+		BaseNode: &ast.BaseNode{},
+		Start:    token.New(string(token.BinaryTag), string(token.BinaryTag), e.pos(column)),
+		Value:    ast.String(token.New(v, v, e.pos(column))),
+	}
+}
+
+func encodeBase64(b []byte) string {
+	const lineLen = 70
+	encLen := base64.StdEncoding.EncodedLen(len(b))
+	lines := encLen/lineLen + 1
+	buf := make([]byte, encLen*2+lines)
+	in := buf[0:encLen]
+	out := buf[encLen:]
+	base64.StdEncoding.Encode(in, b)
+	k := 0
+	for i := 0; i < len(in); i += lineLen {
+		j := i + lineLen
+		if j > len(in) {
+			j = len(in)
+		}
+		k += copy(out[k:], in[i:j])
+		if lines > 1 {
+			out[k] = '\n'
+			k++
+		}
+	}
+	return string(out[:k])
 }
